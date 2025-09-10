@@ -23,20 +23,28 @@ class _RadioViewState extends State<RadioView> {
     super.initState();
     final radio = context.read<RadioController>();
 
-    // Create a mutable copy of the channels from the controller.
     _channels = List<Channel>.from(radio.channels);
     _channelDataSource = ChannelDataSource(
       channels: _channels,
-      onRowsMoved: handleRowDragAndDrop, // Pass the handler to the data source
+      onMoveUp: _moveChannelUp,
+      onMoveDown: _moveChannelDown,
     );
   }
 
-  void handleRowDragAndDrop(int oldIndex, int newIndex) {
-    if (!mounted) return;
+  void _moveChannelUp(int index) {
+    if (index == 0 || !mounted) return;
     setState(() {
-      final row = _channels.removeAt(oldIndex);
-      _channels.insert(newIndex, row);
-      // After reordering, we need to regenerate the data source rows.
+      final item = _channels.removeAt(index);
+      _channels.insert(index - 1, item);
+      _channelDataSource.updateDataGridSource();
+    });
+  }
+
+  void _moveChannelDown(int index) {
+    if (index >= _channels.length - 1 || !mounted) return;
+    setState(() {
+      final item = _channels.removeAt(index);
+      _channels.insert(index + 1, item);
       _channelDataSource.updateDataGridSource();
     });
   }
@@ -48,7 +56,6 @@ class _RadioViewState extends State<RadioView> {
 
     bool isReadyToUpload = radio.isConnected;
 
-    // Step 1: If not connected, guide the user to reconnect.
     if (!isReadyToUpload) {
       final bool? wantsToConnect = await showDialog<bool>(
         context: context,
@@ -69,13 +76,11 @@ class _RadioViewState extends State<RadioView> {
         ),
       );
 
-      // If the user clicked "Connect", attempt the connection.
       if (wantsToConnect == true) {
         isReadyToUpload = await radio.connect(isReconnection: true);
       }
     }
 
-    // Step 2: If we are not connected after the prompt, cancel the upload.
     if (!isReadyToUpload) {
       scaffoldMessenger.showSnackBar(
         const SnackBar(content: Text('Upload cancelled. No device connected.')),
@@ -83,7 +88,6 @@ class _RadioViewState extends State<RadioView> {
       return;
     }
 
-    // Step 3: Perform the upload with progress feedback.
     final progressNotifier =
         ValueNotifier<String>('Starting channel upload...');
     showDialog(
@@ -117,25 +121,21 @@ class _RadioViewState extends State<RadioView> {
 
         if (isLastChannel) {
           progressNotifier.value = 'Saving final channel... This may take a moment.';
-          // Give the final, slow write-to-memory operation a much longer timeout.
           await radio.writeChannel(channelToWrite,
               timeout: const Duration(seconds: 30));
         } else {
-          // Use the default timeout for all other channels.
           await radio.writeChannel(channelToWrite);
         }
 
-        // After every 8 channels, take a longer "cool-down" break.
         if ((i + 1) % 8 == 0 && !isLastChannel) {
           progressNotifier.value = 'Pausing to let radio process...';
           await Future.delayed(const Duration(seconds: 1));
         } else {
-          // Use the regular, shorter delay for all other channels.
           await Future.delayed(const Duration(milliseconds: 200));
         }
       }
 
-      navigator.pop(); // Close the progress dialog
+      navigator.pop();
       scaffoldMessenger.showSnackBar(
         const SnackBar(
           content: Text('Upload complete! ✅'),
@@ -143,7 +143,7 @@ class _RadioViewState extends State<RadioView> {
         ),
       );
     } catch (e) {
-      navigator.pop(); // Close the progress dialog
+      navigator.pop();
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text('Upload failed: $e'),

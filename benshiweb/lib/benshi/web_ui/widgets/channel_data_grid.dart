@@ -18,7 +18,6 @@ class ChannelDataGrid extends StatelessWidget {
       allowEditing: true,
       selectionMode: SelectionMode.single,
       navigationMode: GridNavigationMode.cell,
-      // allowDraggingRows: true, // Removed: No such property in SfDataGrid
       columns: [
         GridColumn(columnName: 'channelId', allowEditing: false, width: 60, label: const Center(child: Text('ID'))),
         GridColumn(columnName: 'name', label: const Center(child: Text('Name'))),
@@ -29,6 +28,7 @@ class ChannelDataGrid extends StatelessWidget {
         GridColumn(columnName: 'bandwidth', label: const Center(child: Text('BW'))),
         GridColumn(columnName: 'txPower', label: const Center(child: Text('Power'))),
         GridColumn(columnName: 'scan', width: 80, label: const Center(child: Text('Scan'))),
+        GridColumn(columnName: 'actions', allowEditing: false, width: 100, label: const Center(child: Text('Move'))),
       ],
     );
   }

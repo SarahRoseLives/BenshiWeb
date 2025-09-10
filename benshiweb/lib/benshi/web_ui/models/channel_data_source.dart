@@ -1,5 +1,3 @@
-// lib/benshi/web_ui/models/channel_data_source.dart
-
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 import '../../protocol/data_models.dart';
@@ -8,43 +6,42 @@ import '../../protocol/common.dart';
 class ChannelDataSource extends DataGridSource {
   List<Channel> _channels;
   List<DataGridRow> _channelRows = [];
-  final void Function(int oldIndex, int newIndex) onRowsMoved;
+  final void Function(int index) onMoveUp;
+  final void Function(int index) onMoveDown;
 
-  // This will hold the new value from the editor temporarily.
   dynamic newCellValue;
 
   ChannelDataSource({
     required List<Channel> channels,
-    required this.onRowsMoved, // Callback to update state in the view
+    required this.onMoveUp,
+    required this.onMoveDown,
   }) : _channels = channels {
     updateDataGridSource();
   }
 
-  // Helper to rebuild DataGridRows when the underlying data is changed.
   void updateDataGridSource() {
     _channelRows = _channels.asMap().entries.map<DataGridRow>((entry) {
       final index = entry.key;
       final channel = entry.value;
       return DataGridRow(cells: [
-        DataGridCell<int>(columnName: 'channelId', value: index),
+        DataGridCell<int>(columnName: 'channelId', value: index + 1),
         DataGridCell<String>(columnName: 'name', value: channel.name),
         DataGridCell<double>(columnName: 'rxFreq', value: channel.rxFreq),
         DataGridCell<double>(columnName: 'txFreq', value: channel.txFreq),
-        DataGridCell<String>(columnName: 'rxTone', value: Channel.formatSubAudio(channel.rxSubAudio)),
-        DataGridCell<String>(columnName: 'txTone', value: Channel.formatSubAudio(channel.txSubAudio)),
-        DataGridCell<String>(columnName: 'bandwidth', value: channel.bandwidth.name),
+        DataGridCell<String>(
+            columnName: 'rxTone',
+            value: Channel.formatSubAudio(channel.rxSubAudio)),
+        DataGridCell<String>(
+            columnName: 'txTone',
+            value: Channel.formatSubAudio(channel.txSubAudio)),
+        DataGridCell<String>(
+            columnName: 'bandwidth', value: channel.bandwidth.name),
         DataGridCell<String>(columnName: 'txPower', value: channel.txPower),
         DataGridCell<bool>(columnName: 'scan', value: channel.scan),
+        DataGridCell<int>(columnName: 'actions', value: index),
       ]);
     }).toList();
-    notifyListeners(); // Important to refresh the grid UI
-  }
-
-  // --- DRAG AND DROP LOGIC ---
-  @override
-  Future<void> onRowDrop(int oldIndex, int newIndex) async {
-    // This calls the method in RadioView to update the state.
-    onRowsMoved(oldIndex, newIndex);
+    notifyListeners();
   }
 
   @override
@@ -55,15 +52,36 @@ class ChannelDataSource extends DataGridSource {
     return DataGridRowAdapter(
       cells: row.getCells().map<Widget>((cell) {
         if (cell.columnName == 'scan') {
-          return Checkbox(
-            value: cell.value as bool,
-            onChanged: (value) {
-              if (value != null) {
-                final rowIndex = _channelRows.indexOf(row);
-                _channels[rowIndex] = _channels[rowIndex].copyWith(scan: value);
-                updateDataGridSource();
-              }
-            },
+          return Center(
+            child: Checkbox(
+              value: cell.value as bool,
+              onChanged: (value) {
+                if (value != null) {
+                  final rowIndex = _channelRows.indexOf(row);
+                  _channels[rowIndex] =
+                      _channels[rowIndex].copyWith(scan: value);
+                  updateDataGridSource();
+                }
+              },
+            ),
+          );
+        } else if (cell.columnName == 'actions') {
+          final index = cell.value as int;
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_upward),
+                onPressed: index == 0 ? null : () => onMoveUp(index),
+                tooltip: 'Move Up',
+              ),
+              IconButton(
+                icon: const Icon(Icons.arrow_downward),
+                onPressed:
+                    index == _channels.length - 1 ? null : () => onMoveDown(index),
+                tooltip: 'Move Down',
+              ),
+            ],
           );
         }
         return Container(
@@ -75,27 +93,32 @@ class ChannelDataSource extends DataGridSource {
     );
   }
 
-  // --- EDITING LOGIC (Using the correct modern API) ---
-
   @override
-  Widget? buildEditWidget(DataGridRow dataGridRow, RowColumnIndex rowColumnIndex, GridColumn column, void Function() submitCell) {
-    final dynamic oldValue = dataGridRow.getCells()[rowColumnIndex.columnIndex].value;
+  Widget? buildEditWidget(DataGridRow dataGridRow,
+      RowColumnIndex rowColumnIndex, GridColumn column, void Function() submitCell) {
+    final dynamic oldValue =
+        dataGridRow.getCells()[rowColumnIndex.columnIndex].value;
 
     if (column.columnName == 'bandwidth') {
-      return _buildDropdownEditor(oldValue.toString(), BandwidthType.values.map((e) => e.name).toList(), submitCell);
+      return _buildDropdownEditor(oldValue.toString(),
+          BandwidthType.values.map((e) => e.name).toList(), submitCell);
     } else if (column.columnName == 'txPower') {
-      return _buildDropdownEditor(oldValue.toString(), ['High', 'Medium', 'Low'], submitCell);
+      return _buildDropdownEditor(
+          oldValue.toString(), ['High', 'Medium', 'Low'], submitCell);
     } else {
       return _buildTextEditor(oldValue.toString(), submitCell);
     }
   }
 
   @override
-  Future<void> onCellSubmit(DataGridRow dataGridRow, RowColumnIndex rowColumnIndex, GridColumn column) async {
+  Future<void> onCellSubmit(DataGridRow dataGridRow,
+      RowColumnIndex rowColumnIndex, GridColumn column) async {
     final int dataRowIndex = _channelRows.indexOf(dataGridRow);
-    final dynamic oldValue = dataGridRow.getCells()[rowColumnIndex.columnIndex].value;
+    final dynamic oldValue =
+        dataGridRow.getCells()[rowColumnIndex.columnIndex].value;
 
-    if (newCellValue == null || oldValue.toString() == newCellValue.toString()) {
+    if (newCellValue == null ||
+        oldValue.toString() == newCellValue.toString()) {
       newCellValue = null;
       return;
     }
@@ -105,27 +128,37 @@ class ChannelDataSource extends DataGridSource {
 
     switch (column.columnName) {
       case 'name':
-        _channels[channelIndex] = currentChannel.copyWith(name: newCellValue as String);
+        _channels[channelIndex] =
+            currentChannel.copyWith(name: newCellValue as String);
         break;
       case 'rxFreq':
-        _channels[channelIndex] = currentChannel.copyWith(rxFreq: double.tryParse(newCellValue.toString()) ?? currentChannel.rxFreq);
+        _channels[channelIndex] = currentChannel.copyWith(
+            rxFreq: double.tryParse(newCellValue.toString()) ??
+                currentChannel.rxFreq);
         break;
       case 'txFreq':
-        _channels[channelIndex] = currentChannel.copyWith(txFreq: double.tryParse(newCellValue.toString()) ?? currentChannel.txFreq);
+        _channels[channelIndex] = currentChannel.copyWith(
+            txFreq: double.tryParse(newCellValue.toString()) ??
+                currentChannel.txFreq);
         break;
       case 'rxTone':
-          _channels[channelIndex] = currentChannel.copyWith(rxSubAudio: Channel.parseSubAudioFromString(newCellValue.toString()));
+        _channels[channelIndex] = currentChannel.copyWith(
+            rxSubAudio: Channel.parseSubAudioFromString(newCellValue.toString()));
         break;
       case 'txTone':
-          _channels[channelIndex] = currentChannel.copyWith(txSubAudio: Channel.parseSubAudioFromString(newCellValue.toString()));
+        _channels[channelIndex] = currentChannel.copyWith(
+            txSubAudio: Channel.parseSubAudioFromString(newCellValue.toString()));
         break;
       case 'bandwidth':
-        _channels[channelIndex] = currentChannel.copyWith(bandwidth: BandwidthType.values.firstWhere((e) => e.name == newCellValue));
+        _channels[channelIndex] = currentChannel.copyWith(
+            bandwidth:
+                BandwidthType.values.firstWhere((e) => e.name == newCellValue));
         break;
       case 'txPower':
         bool isMax = newCellValue == 'High';
         bool isMed = newCellValue == 'Medium';
-        _channels[channelIndex] = currentChannel.copyWith(txAtMaxPower: isMax, txAtMedPower: isMed);
+        _channels[channelIndex] =
+            currentChannel.copyWith(txAtMaxPower: isMax, txAtMedPower: isMed);
         break;
     }
 
@@ -134,7 +167,8 @@ class ChannelDataSource extends DataGridSource {
   }
 
   Widget _buildTextEditor(String oldValue, void Function() submitCell) {
-    final TextEditingController controller = TextEditingController(text: oldValue);
+    final TextEditingController controller =
+        TextEditingController(text: oldValue);
     return Container(
       padding: const EdgeInsets.all(8.0),
       alignment: Alignment.center,
@@ -152,7 +186,8 @@ class ChannelDataSource extends DataGridSource {
     );
   }
 
-  Widget _buildDropdownEditor(String oldValue, List<String> items, void Function() submitCell) {
+  Widget _buildDropdownEditor(
+      String oldValue, List<String> items, void Function() submitCell) {
     return Container(
       padding: const EdgeInsets.all(8.0),
       alignment: Alignment.center,
