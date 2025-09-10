@@ -5,31 +5,24 @@ import 'package:provider/provider.dart';
 import '../../radio_controller.dart';
 import 'radio_view.dart';
 
-class HomeView extends StatelessWidget {
+class HomeView extends StatefulWidget {
   const HomeView({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => RadioController(),
-      child: const _HomeViewBody(),
-    );
-  }
+  State<HomeView> createState() => _HomeViewState();
 }
 
-class _HomeViewBody extends StatefulWidget {
-  const _HomeViewBody();
-
-  @override
-  State<_HomeViewBody> createState() => _HomeViewBodyState();
-}
-
-class _HomeViewBodyState extends State<_HomeViewBody> {
+class _HomeViewState extends State<HomeView> {
   String _status = 'Ready to Connect';
   bool _isConnecting = false;
 
   Future<void> _connectToRadio() async {
+    // Access the single, app-wide RadioController instance.
     final radio = Provider.of<RadioController>(context, listen: false);
+
+    // Ensure the completer is fresh if we're reconnecting after an error or back navigation.
+    radio.resetInitializationCompleter();
+
     setState(() {
       _status = 'Opening browser device picker...';
       _isConnecting = true;
@@ -39,19 +32,17 @@ class _HomeViewBodyState extends State<_HomeViewBody> {
       final success = await radio.connect();
       if (success && mounted) {
         setState(() => _status = 'Connected! Initializing radio state...');
-        // Wait for the initial handshake and data download to complete
         await radio.waitForInitialization();
         if (mounted) {
+          // Navigate to the RadioView. It will find the same controller.
+          // No provider is needed here.
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => ChangeNotifierProvider.value(
-                value: radio,
-                child: const RadioView(),
-              ),
+              builder: (context) => const RadioView(),
             ),
           );
         }
-      } else if(mounted) {
+      } else if (mounted) {
         setState(() => _status = 'No device selected or connection failed.');
       }
     } catch (e) {
@@ -75,7 +66,8 @@ class _HomeViewBodyState extends State<_HomeViewBody> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.radio, size: 100, color: Theme.of(context).colorScheme.primary),
+                Icon(Icons.radio,
+                    size: 100, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(height: 20),
                 Text(
                   'Welcome to the Benshi Web Programmer',
@@ -97,7 +89,8 @@ class _HomeViewBodyState extends State<_HomeViewBody> {
                     icon: const Icon(Icons.bluetooth_searching),
                     label: const Text('Connect to Radio'),
                     style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 30, vertical: 15),
                       textStyle: const TextStyle(fontSize: 18),
                     ),
                   ),

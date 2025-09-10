@@ -7,8 +7,8 @@ import 'benshi/web_ui/views/home_view.dart';
 
 void main() {
   runApp(
-    // Provide the RadioController to the entire application. This ensures
-    // the controller's state persists across navigation events.
+    // This is the ONLY place the RadioController should be created.
+    // By placing it here, its lifecycle is tied to the entire app.
     ChangeNotifierProvider(
       create: (_) => RadioController(),
       child: const BluetoothWebApp(),

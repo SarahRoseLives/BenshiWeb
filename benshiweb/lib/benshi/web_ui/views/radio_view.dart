@@ -42,72 +42,91 @@ class _RadioViewState extends State<RadioView> {
   }
 
   Future<void> _uploadToRadio() async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
     final radio = context.read<RadioController>();
-    final progressNotifier = ValueNotifier<String>('Connecting to radio...');
 
-    // Show a dialog that can be updated during the process.
+    bool isReadyToUpload = radio.isConnected;
+
+    // Step 1: If not connected, guide the user to reconnect.
+    if (!isReadyToUpload) {
+      final bool? wantsToConnect = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Reconnect Required'),
+          content: const Text(
+              'To upload data, you need a fresh connection to the radio. Please select your device in the upcoming browser prompt.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Connect'),
+            ),
+          ],
+        ),
+      );
+
+      // If the user clicked "Connect", attempt the connection.
+      if (wantsToConnect == true) {
+        isReadyToUpload = await radio.connect(isReconnection: true);
+      }
+    }
+
+    // Step 2: If we are not connected after the prompt, cancel the upload.
+    if (!isReadyToUpload) {
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Upload cancelled. No device connected.')),
+      );
+      return;
+    }
+
+    // Step 3: Perform the upload with progress feedback.
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Upload in Progress'),
-        content: ValueListenableBuilder<String>(
-          valueListenable: progressNotifier,
-          builder: (context, value, child) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(height: 20),
-                Text(value),
-              ],
-            );
-          },
+      builder: (context) => const AlertDialog(
+        title: Text('Uploading to Radio...'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 20),
+            Text('Writing channels. Please wait.'),
+          ],
         ),
       ),
     );
 
     try {
-      // Step 1: Check connection and reconnect if needed.
-      if (!radio.isConnected) {
-        final success = await radio.reconnect();
-        if (!success) {
-          throw Exception('Failed to reconnect to the radio.');
-        }
-      }
-
-      // Step 2: Proceed with the upload.
-      progressNotifier.value = 'Uploading channels... Please wait.';
       for (int i = 0; i < _channels.length; i++) {
-        // IMPORTANT: Update the channelId to match its current position in the list.
         final channelToWrite = _channels[i].copyWith(channelId: i);
         await radio.writeChannel(channelToWrite);
         await Future.delayed(const Duration(milliseconds: 50));
       }
 
-      if (mounted) {
-        Navigator.of(context).pop(); // Close the progress dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Upload complete!'), backgroundColor: Colors.green),
-        );
-      }
+      navigator.pop(); // Close the progress dialog
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('Upload complete!'),
+          backgroundColor: Colors.green,
+        ),
+      );
     } catch (e) {
-      if (mounted) {
-        Navigator.of(context).pop(); // Close the progress dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Upload failed: $e'),
-              backgroundColor: Colors.red),
-        );
-      }
+      navigator.pop(); // Close the progress dialog
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text('Upload failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Using context.watch() ensures this widget rebuilds whenever the
-    // RadioController notifies its listeners (e.g., on disconnect).
     final radio = context.watch<RadioController>();
     final devInfo = radio.deviceInfo;
     const totalChannels = 32;

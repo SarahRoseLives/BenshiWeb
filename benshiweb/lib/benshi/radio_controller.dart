@@ -16,11 +16,10 @@ class RadioController extends ChangeNotifier {
   dynamic _btDevice;
   dynamic _txCharacteristic;
 
-  final StreamController<Message> _messageStreamController =
+  StreamController<Message> _messageStreamController =
       StreamController<Message>.broadcast();
 
-  final BytesBuilder _aprsReassemblyBuffer = BytesBuilder();
-  final Completer<void> _initializationCompleter = Completer<void>();
+  Completer<void> _initializationCompleter = Completer<void>();
 
   // --- State Properties ---
   bool isConnected = false;
@@ -31,12 +30,22 @@ class RadioController extends ChangeNotifier {
   Channel? channelA;
   Channel? channelB;
   List<Channel> channels = [];
+  bool _isDisposed = false;
 
   RadioController();
 
+  /// Resets the completer used to track the initial download of radio data.
+  /// This should be called before `connect` if a previous connection attempt
+  /// failed or if the user is starting a new session.
+  void resetInitializationCompleter() {
+    if (_initializationCompleter.isCompleted) {
+      _initializationCompleter = Completer<void>();
+    }
+  }
+
   Future<void> waitForInitialization() => _initializationCompleter.future;
 
-  Future<bool> connect() async {
+  Future<bool> connect({bool isReconnection = false}) async {
     const primaryServiceUUID = "00001100-d102-11e1-9b23-00025b00a5a5";
     const txCharacteristicUUID = "00001101-d102-11e1-9b23-00025b00a5a5";
     const rxCharacteristicUUID = "00001102-d102-11e1-9b23-00025b00a5a5";
@@ -83,7 +92,10 @@ class RadioController extends ChangeNotifier {
         _onDataReceived(byteData.buffer.asUint8List());
       }));
 
-      unawaited(_initializeRadioState());
+      if (!isReconnection) {
+        unawaited(_initializeRadioState());
+      }
+
       return true;
     } catch (e) {
       if (kDebugMode) print('Web Bluetooth connection error: $e');
@@ -92,65 +104,19 @@ class RadioController extends ChangeNotifier {
     }
   }
 
-  Future<bool> reconnect() async {
-    if (_btDevice == null) {
-      if (kDebugMode) print("Reconnect failed: No device has been previously connected.");
-      return false;
-    }
-
-    final gatt = js_util.getProperty(_btDevice, 'gatt');
-    if (js_util.getProperty(gatt, 'connected')) {
-      isConnected = true;
-      return true; // Already connected
-    }
-
-    if (kDebugMode) print("Attempting to reconnect...");
-    try {
-      const primaryServiceUUID = "00001100-d102-11e1-9b23-00025b00a5a5";
-      const txCharacteristicUUID = "00001101-d102-11e1-9b23-00025b00a5a5";
-      const rxCharacteristicUUID = "00001102-d102-11e1-9b23-00025b00a5a5";
-
-      final serverPromise = js_util.callMethod(gatt, 'connect', []);
-      final server = await js_util.promiseToFuture(serverPromise);
-
-      final servicePromise =
-          js_util.callMethod(server, 'getPrimaryService', [primaryServiceUUID]);
-      final service = await js_util.promiseToFuture(servicePromise);
-
-      final txPromise =
-          js_util.callMethod(service, 'getCharacteristic', [txCharacteristicUUID]);
-      _txCharacteristic = await js_util.promiseToFuture(txPromise);
-
-      final rxPromise =
-          js_util.callMethod(service, 'getCharacteristic', [rxCharacteristicUUID]);
-      final rxCharacteristic = await js_util.promiseToFuture(rxPromise);
-      await js_util.promiseToFuture(
-          js_util.callMethod(rxCharacteristic, 'startNotifications', []));
-
-      isConnected = true;
-      notifyListeners();
-      if (kDebugMode) print("Reconnect successful.");
-      return true;
-    } catch (e) {
-      if (kDebugMode) print("Reconnect failed: $e");
-      _handleDisconnection("Reconnection attempt failed.");
-      return false;
-    }
-  }
-
   void _handleDisconnection(String reason) {
-    if (!isConnected) return;
+    if (!isConnected || _isDisposed) return;
     if (kDebugMode) print("--- $reason ---");
     isConnected = false;
-    // DO NOT nullify _btDevice. We need it to reconnect.
+    _btDevice = null;
     _txCharacteristic = null;
     notifyListeners();
   }
 
   void disconnect() {
-    if (_btDevice != null && isConnected) {
+    if (_btDevice != null) {
       final gatt = js_util.getProperty(_btDevice, 'gatt');
-      if (gatt != null) {
+      if (gatt != null && js_util.getProperty(gatt, 'connected')) {
         js_util.callMethod(gatt, 'disconnect', []);
       }
     }
@@ -158,6 +124,7 @@ class RadioController extends ChangeNotifier {
   }
 
   void _onDataReceived(Uint8List data) {
+    if (_messageStreamController.isClosed) return;
     if (kDebugMode) print("RAW RX: $data");
     try {
       final message = Message.fromBytes(data);
@@ -175,6 +142,7 @@ class RadioController extends ChangeNotifier {
   }
 
   void _handleEvent(EventNotificationBody eventBody) async {
+    if (_isDisposed) return;
     if (eventBody.event case GetHtStatusReplyBody(status: final newStatus?)) {
       status = newStatus;
     } else if (eventBody.event case ReadSettingsReplyBody(settings: final newSettings?)) {
@@ -206,14 +174,13 @@ class RadioController extends ChangeNotifier {
       const totalChannelsToRead = 32;
       final newChannels = <Channel>[];
       for (int i = 0; i < totalChannelsToRead; i++) {
-        if (!isConnected) break;
+        if (!isConnected || _isDisposed) break;
         final channel = await getChannel(i);
         newChannels.add(channel);
         channels = List.from(newChannels);
         notifyListeners();
         await Future.delayed(const Duration(milliseconds: 50));
       }
-
     } catch (e) {
       if (kDebugMode) print('Error initializing radio state: $e');
     } finally {
@@ -250,6 +217,9 @@ class RadioController extends ChangeNotifier {
     bool Function(T body)? validator,
     Duration timeout = const Duration(seconds: 10),
   }) async {
+    if (_messageStreamController.isClosed) {
+      throw Exception("Controller is disposed, cannot send command.");
+    }
     final completer = Completer<T>();
     late StreamSubscription streamSub;
 
@@ -271,7 +241,7 @@ class RadioController extends ChangeNotifier {
 
     try {
       await _sendCommand(command);
-    } catch(e) {
+    } catch (e) {
       streamSub.cancel();
       completer.completeError(e);
     }
@@ -295,6 +265,7 @@ class RadioController extends ChangeNotifier {
       EventType.DATA_RXD,
     ];
     for (var eventType in eventsToRegister) {
+      if (_isDisposed) break;
       await _sendCommand(Message(
           commandGroup: CommandGroup.BASIC,
           command: BasicCommand.REGISTER_NOTIFICATION,
@@ -369,8 +340,11 @@ class RadioController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _isDisposed = true;
     disconnect();
-    _messageStreamController.close();
+    if (!_messageStreamController.isClosed) {
+      _messageStreamController.close();
+    }
     super.dispose();
   }
 }
