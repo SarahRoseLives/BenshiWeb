@@ -325,7 +325,7 @@ class RadioController extends ChangeNotifier {
     return reply.rfCh!;
   }
 
-  Future<void> writeChannel(Channel channel) async {
+  Future<void> writeChannel(Channel channel, {Duration? timeout}) async {
     await _sendCommandExpectReply<WriteRFChReplyBody>(
       command: Message(
         commandGroup: CommandGroup.BASIC,
@@ -335,6 +335,7 @@ class RadioController extends ChangeNotifier {
       ),
       replyCommand: BasicCommand.WRITE_RF_CH,
       validator: (body) => body.channelId == channel.channelId,
+      timeout: timeout ?? const Duration(seconds: 10),
     );
   }
 

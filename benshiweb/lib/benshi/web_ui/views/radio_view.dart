@@ -84,33 +84,61 @@ class _RadioViewState extends State<RadioView> {
     }
 
     // Step 3: Perform the upload with progress feedback.
+    final progressNotifier =
+        ValueNotifier<String>('Starting channel upload...');
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        title: Text('Uploading to Radio...'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 20),
-            Text('Writing channels. Please wait.'),
-          ],
+      builder: (context) => AlertDialog(
+        title: const Text('Uploading to Radio'),
+        content: ValueListenableBuilder<String>(
+          valueListenable: progressNotifier,
+          builder: (context, value, child) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 20),
+                Text(value),
+              ],
+            );
+          },
         ),
       ),
     );
 
     try {
       for (int i = 0; i < _channels.length; i++) {
+        progressNotifier.value =
+            'Writing channel ${i + 1} of ${_channels.length}...';
+
         final channelToWrite = _channels[i].copyWith(channelId: i);
-        await radio.writeChannel(channelToWrite);
-        await Future.delayed(const Duration(milliseconds: 50));
+        final bool isLastChannel = i == _channels.length - 1;
+
+        if (isLastChannel) {
+          progressNotifier.value = 'Saving final channel... This may take a moment.';
+          // Give the final, slow write-to-memory operation a much longer timeout.
+          await radio.writeChannel(channelToWrite,
+              timeout: const Duration(seconds: 30));
+        } else {
+          // Use the default timeout for all other channels.
+          await radio.writeChannel(channelToWrite);
+        }
+
+        // After every 8 channels, take a longer "cool-down" break.
+        if ((i + 1) % 8 == 0 && !isLastChannel) {
+          progressNotifier.value = 'Pausing to let radio process...';
+          await Future.delayed(const Duration(seconds: 1));
+        } else {
+          // Use the regular, shorter delay for all other channels.
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
       }
 
       navigator.pop(); // Close the progress dialog
       scaffoldMessenger.showSnackBar(
         const SnackBar(
-          content: Text('Upload complete!'),
+          content: Text('Upload complete! ✅'),
           backgroundColor: Colors.green,
         ),
       );
@@ -122,6 +150,8 @@ class _RadioViewState extends State<RadioView> {
           backgroundColor: Colors.red,
         ),
       );
+    } finally {
+      progressNotifier.dispose();
     }
   }
 
